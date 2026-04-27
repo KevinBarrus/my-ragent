@@ -1,0 +1,4 @@
+framework:
+  cache:
+    redis:
+      prefix: "my_ragent:"
