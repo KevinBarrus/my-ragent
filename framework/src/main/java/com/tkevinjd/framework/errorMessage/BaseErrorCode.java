@@ -1,4 +1,4 @@
-package com.tkevinjd.framework.errorcode;
+package com.tkevinjd.framework.errorMessage;
 
 import lombok.AllArgsConstructor;
 
@@ -16,7 +16,7 @@ import lombok.AllArgsConstructor;
  * </p>
  */
 @AllArgsConstructor
-public enum BaseErrorCode implements ErrorCode{
+public enum BaseErrorCode implements ErrorMessage {
     // ========== A 类错误：用户端错误 ==========
 
     /**

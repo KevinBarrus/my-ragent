@@ -1,9 +1,9 @@
-package com.tkevinjd.framework.errorcode;
+package com.tkevinjd.framework.errorMessage;
 
 /**
  * 定义错误码接口
  */
-public interface ErrorCode {
+public interface ErrorMessage {
 
     /**
      * 错误码
