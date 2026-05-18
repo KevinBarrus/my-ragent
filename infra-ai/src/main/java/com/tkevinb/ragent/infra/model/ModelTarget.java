@@ -1,6 +1,8 @@
 package com.tkevinb.ragent.infra.model;
 
 
+import com.tkevinb.ragent.infra.config.AIModelProperties;
+
 /**
  * 模型目标配置记录
  * <p>
@@ -8,8 +10,9 @@ package com.tkevinb.ragent.infra.model;
  * </p>
  * @param id    模型唯一标识符
  */
-// TODO 添加候选模型配置与提供商配置
 public record ModelTarget(
-        String id
+        String id,
+        AIModelProperties.ModelCandidate candidate,
+        AIModelProperties.ProviderConfig provider
 ) {
 }
