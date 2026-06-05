@@ -1,9 +1,25 @@
 package com.tkevinb.ragent.rag.service.pipeline;
 
+import com.tkevinb.ragent.framework.convention.ChatMessage;
+import com.tkevinb.ragent.framework.convention.ChatRequest;
+import com.tkevinb.ragent.infra.chat.LLMService;
+import com.tkevinb.ragent.infra.chat.StreamCancellationHandle;
+import com.tkevinb.ragent.rag.core.intent.IntentResolver;
+import com.tkevinb.ragent.rag.core.memory.ConversationMemoryService;
+import com.tkevinb.ragent.rag.core.prompt.PromptContext;
+import com.tkevinb.ragent.rag.core.prompt.PromptTemplateLoader;
+import com.tkevinb.ragent.rag.core.prompt.RAGPromptService;
+import com.tkevinb.ragent.rag.core.retrieve.RetrievalEngine;
+import com.tkevinb.ragent.rag.core.rewrite.QueryRewriteService;
+import com.tkevinb.ragent.rag.core.rewrite.RewriteResult;
 import com.tkevinb.ragent.rag.dto.RetrievalContext;
+import com.tkevinb.ragent.rag.dto.SubQuestionIntent;
+import com.tkevinb.ragent.rag.service.handler.StreamTaskManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
 
 /**
  * 流式对话流水线
@@ -17,6 +33,15 @@ import org.springframework.stereotype.Service;
 @Service
 @RequiredArgsConstructor
 public class StreamChatPipeline {
+
+    private final ConversationMemoryService memoryService;
+    private final QueryRewriteService queryRewriteService;
+    private final IntentResolver intentResolver;
+    private final RetrievalEngine retrievalEngine;
+    private final RAGPromptService promptService;
+    private final LLMService llmService;
+    private final StreamTaskManager taskManager;
+    private final PromptTemplateLoader templateLoader;
 
     /**
      * 执行流式对话管道
@@ -51,40 +76,77 @@ public class StreamChatPipeline {
         RagResponse(ctx, retrievalCtx);
     }
 
+    //加载本次对话之前的历史记录，同时将当前用户问题写入数据库
     private void loadMemory(StreamChatContext ctx) {
-        log.info("加载历史记忆");
+        List<ChatMessage> history = memoryService.loadAndAppend(
+                ctx.getConversationId(), ctx.getUserId(),
+                ChatMessage.user(ctx.getQuestion())
+        );
+        ctx.setHistory(history);
     }
 
+    //改写为子问题+重写问题
     private void rewriteQuestion(StreamChatContext ctx) {
-        log.info("重写问题");
+        RewriteResult result = queryRewriteService.rewriteWithSplit(
+                ctx.getQuestion(), ctx.getHistory()
+        );
+        ctx.setRewriteResult(result);
     }
 
+    //进行意图解析，采用树状结构意图节点
     private void parseIntent(StreamChatContext ctx) {
-        log.info("意图解析");
+        List<SubQuestionIntent> subIntents = intentResolver.resolve(ctx.getRewriteResult());
+        ctx.setSubIntents(subIntents);
     }
 
+    //MVP阶段暂时跳过
     private boolean handleGuideAmbiguity(StreamChatContext ctx) {
         log.info("处理歧义引导");
         return false;
     }
 
+    //MVP阶段暂时跳过
     private boolean handleSystemOnlyQuestion(StreamChatContext ctx) {
         log.info("处理纯系统问题");
         return false;
     }
 
+    //进行检索
     private RetrievalContext retrieve(StreamChatContext ctx) {
-        log.info("检索");
-        return null;
+        return retrievalEngine.retrieve(ctx.getSubIntents(), 5);
     }
 
-    private boolean handleEmptySearchResult(StreamChatContext ctx, RetrievalContext retrievalCtx) {
-        log.info("处理空检索结果");
-        return false;
+    //检索为空的处理手段
+    private boolean handleEmptySearchResult(StreamChatContext ctx, RetrievalContext c) {
+        if (!c.isEmpty()) return false;
+        ctx.getCallback().onContent("未检索到与问题相关的文档内容。");
+        ctx.getCallback().onComplete();
+        return true;
     }
 
+    //构建流式响应
     private void RagResponse(StreamChatContext ctx, RetrievalContext retrievalCtx) {
-        log.info("生成响应");
+        PromptContext promptCtx = PromptContext.builder()
+                .question(ctx.getRewriteResult().rewrittenQuestion())
+                .kbContext(retrievalCtx.getKbContext())
+                .mcpContext(retrievalCtx.getMcpContext())
+                .intentChunks(retrievalCtx.getIntentChunks())
+                .build();
+
+        List<ChatMessage> messages = promptService.buildStructuredPrompt(
+                promptCtx, ctx.getHistory(),
+                ctx.getRewriteResult().rewrittenQuestion(),
+                ctx.getRewriteResult().subQuestions()
+        );
+
+        ChatRequest req = ChatRequest.builder()
+                .messages(messages)
+                .thinking(ctx.isDeepThinking())
+                .temperature(0D) //当前只有kb，不需要发散，后续加入MCP需要调整
+                .build();
+
+        StreamCancellationHandle handle = llmService.streamChat(req, ctx.getCallback());
+        taskManager.bindHandle(ctx.getTaskId(), handle);
     }
 
 }

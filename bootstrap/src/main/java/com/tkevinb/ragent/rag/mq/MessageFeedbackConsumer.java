@@ -15,10 +15,11 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@RocketMQMessageListener(
-        topic = "message-feedback_topic${unique-name:}",
-        consumerGroup = "message-feedback_cg${unique-name:}"
-)
+// TODO 下午接入 RocketMQ 后取消注释
+//@RocketMQMessageListener(
+//        topic = "message-feedback_topic${unique-name:}",
+//        consumerGroup = "message-feedback_cg${unique-name:}"
+//)
 public class MessageFeedbackConsumer implements RocketMQListener<MessageWrapper<MessageFeedbackEvent>> {
 
     private final MessageFeedbackService feedbackService;

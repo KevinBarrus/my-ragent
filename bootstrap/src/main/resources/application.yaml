@@ -1,4 +1,104 @@
-framework:
-  cache:
+server:
+  port: 9090
+  servlet:
+    context-path: /api/ragent
+
+spring:
+  application:
+    name: my-ragent-service
+
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    type: com.zaxxer.hikari.HikariDataSource
+    username: root
+    password: ${MYSQL_PASSWORD:root}
+    url: jdbc:mysql://127.0.0.1:3306/ragent?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+    hikari:
+      connection-timeout: 5000
+      maximum-pool-size: 10
+      minimum-idle: 5
+
+  data:
     redis:
-      prefix: "my_ragent:"
+      host: ${REDIS_HOST:127.0.0.1}
+      port: 6379
+
+# MyBatis-Plus
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# RAG 配置
+rag:
+  default:
+    sse-timeout-ms: 300000
+
+  query-rewrite:
+    enabled: true
+
+  memory:
+    history-keep-turns: 4
+    summary-enabled: false
+    title-max-length: 30
+
+# AI 模型配置（先配一个 Ollama 本地模型）
+ai:
+  providers:
+    ollama:
+      url: http://localhost:11434
+      endpoints:
+        chat: /v1/chat/completions
+        embedding: /v1/embeddings
+
+  selection:
+    failure-threshold: 2
+    open-duration-ms: 30000
+
+  stream:
+    message-chunk-size: 1
+
+  chat:
+    default-model: qwen-local
+    candidates:
+      - id: qwen-local
+        provider: ollama
+        model: qwen2.5:7b
+        priority: 1
+
+  embedding:
+    default-model: emb-local
+    candidates:
+      - id: emb-local
+        provider: ollama
+        model: nomic-embed-text
+        dimension: 768
+        priority: 1
+
+  rerank:
+    default-model: rerank-noop
+    candidates:
+      - id: rerank-noop
+        provider: noop
+        model: noop
+        priority: 100
+
+# RocketMQ 配置（MVP 占位，下午正式接入）
+rocketmq:
+  name-server: ${ROCKETMQ_NAME_SERVER:127.0.0.1:9876}
+  producer:
+    group: ${ROCKETMQ_PRODUCER_GROUP:my-ragent-producer}
+
+# Sa-Token 配置
+sa-token:
+  token-name: Authorization
+  timeout: 2592000
+  is-concurrent: true
+  is-share: false
+  token-style: simple-uuid
+  is-log: false
+  is-print: false
