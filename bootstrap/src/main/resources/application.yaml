@@ -11,7 +11,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     type: com.zaxxer.hikari.HikariDataSource
     username: root
-    password: ${MYSQL_PASSWORD:root}
+    password: 1234
     url: jdbc:mysql://127.0.0.1:3306/ragent?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
     hikari:
       connection-timeout: 5000

@@ -10,7 +10,9 @@ import org.springframework.stereotype.Service;
 import java.util.concurrent.Executor;
 
 /**
- * Ollama ChatClient 实现
+ * Ollama ChatClient 实现（OpenAI 兼容协议）
+ * <p>
+ * 要求 Ollama >= 0.3.0，支持 /v1/chat/completions 端点。
  */
 @Slf4j
 @Service
