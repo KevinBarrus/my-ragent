@@ -8,7 +8,9 @@ import lombok.Getter;
 import com.tkevinb.ragent.framework.convention.ChatMessage;
 import lombok.Setter;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 流式对话上下文
@@ -36,4 +38,29 @@ public class StreamChatContext {
 
     @Setter
     private List<SubQuestionIntent> subIntents;
+
+    // ==================== 各阶段耗时（毫秒） ====================
+
+    @Setter
+    private long loadMemoryMs;
+
+    @Setter
+    private long rewriteMs;
+
+    @Setter
+    private long intentMs;
+
+    @Setter
+    private long retrieveMs;
+
+    @Setter
+    private long llmMs;
+
+    /** 总耗时 */
+    @Setter
+    private long totalMs;
+
+    /** 实验配置标记（用于消融实验日志） */
+    @Setter
+    private String ablationTags;
 }

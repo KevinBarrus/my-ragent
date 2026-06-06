@@ -21,6 +21,11 @@ public enum PromptScene {
     MIXED,
 
     /**
+     * 纯 LLM 对话（无检索、无 MCP），使用系统对话模板
+     */
+    SYSTEM_ONLY,
+
+    /**
      * 无任何检索命中，返回空提示词
      */
     EMPTY

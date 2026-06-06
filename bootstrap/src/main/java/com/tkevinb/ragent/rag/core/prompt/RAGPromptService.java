@@ -115,6 +115,7 @@ public class RAGPromptService {
             case KB_ONLY -> templateLoader.load(RAG_ENTERPRISE_PROMPT_PATH);
             case MCP_ONLY -> templateLoader.load(MCP_ONLY_PROMPT_PATH);
             case MIXED -> templateLoader.load(MCP_KB_MIXED_PROMPT_PATH);
+            case SYSTEM_ONLY -> templateLoader.load(CHAT_SYSTEM_PROMPT_PATH);
             case EMPTY -> "";
         };
     }
@@ -133,7 +134,15 @@ public class RAGPromptService {
         if (context.hasMcp() && context.hasKb()) {
             return planMixed(context);
         }
-        throw new IllegalStateException("PromptContext requires MCP or KB context.");
+        // 纯 LLM 聊天（无 KB 也无 MCP），走 system 模板
+        return planPureLlm();
+    }
+
+    private PromptBuildPlan planPureLlm() {
+        return PromptBuildPlan.builder()
+                .scene(PromptScene.SYSTEM_ONLY)
+                .baseTemplate(templateLoader.load(CHAT_SYSTEM_PROMPT_PATH))
+                .build();
     }
 
     private PromptBuildPlan planKbOnly(PromptContext context) {

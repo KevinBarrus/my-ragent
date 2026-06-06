@@ -11,7 +11,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     type: com.zaxxer.hikari.HikariDataSource
     username: root
-    password: 1234
+    password: ${MYSQL_PASSWORD}
     url: jdbc:mysql://127.0.0.1:3306/ragent?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
     hikari:
       connection-timeout: 5000
@@ -38,6 +38,11 @@ rag:
   default:
     sse-timeout-ms: 300000
 
+  ablation:
+    query-rewrite-enabled: true
+    intent-enabled: true
+    question-split-enabled: true
+
   query-rewrite:
     enabled: true
 
@@ -46,38 +51,38 @@ rag:
     summary-enabled: false
     title-max-length: 30
 
-# AI 模型配置（先配一个 Ollama 本地模型）
+# AI 模型配置（使用 DeepSeek API）
 ai:
   providers:
-    ollama:
-      url: http://localhost:11434
+    deepseek:
+      url: https://api.deepseek.com
+      apiKey: ${DEEPSEEK_API_KEY}
       endpoints:
         chat: /v1/chat/completions
-        embedding: /v1/embeddings
 
   selection:
     failure-threshold: 2
     open-duration-ms: 30000
 
   stream:
-    message-chunk-size: 1
+    message-chunk-size: 5
 
   chat:
-    default-model: qwen-local
+    default-model: deepseek-chat
     candidates:
-      - id: qwen-local
-        provider: ollama
-        model: qwen2.5:7b
+      - id: deepseek-chat
+        provider: deepseek
+        model: deepseek-chat
         priority: 1
 
   embedding:
-    default-model: emb-local
+    default-model: emb-dummy
     candidates:
-      - id: emb-local
-        provider: ollama
-        model: nomic-embed-text
+      - id: emb-dummy
+        provider: deepseek
+        model: text-embedding-ada-002
         dimension: 768
-        priority: 1
+        priority: 100
 
   rerank:
     default-model: rerank-noop
