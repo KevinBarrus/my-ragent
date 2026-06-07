@@ -19,7 +19,7 @@ import java.util.stream.Collectors;
  * TODO 后续替换为 MilvusVectorStoreService 或 PgVectorStoreService
  */
 @Slf4j
-@Service
+//@Service  // 已被 PgVectorStoreService 替代，保留备用
 public class InMemoryVectorStoreService implements VectorStoreService {
 
     private final JdbcTemplate jdbcTemplate;
