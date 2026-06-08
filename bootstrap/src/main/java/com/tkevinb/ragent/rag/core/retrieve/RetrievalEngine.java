@@ -30,11 +30,14 @@ public class RetrievalEngine {
 
     private final List<SearchChannel> channels;
     private final Executor retrieveExecutor;
+    private final BgeRerankService rerankService;
 
     public RetrievalEngine(List<SearchChannel> channels,
-                           @org.springframework.beans.factory.annotation.Qualifier("retrieveExecutor") Executor retrieveExecutor) {
+                           @org.springframework.beans.factory.annotation.Qualifier("retrieveExecutor") Executor retrieveExecutor,
+                           BgeRerankService rerankService) {
         this.channels = channels;
         this.retrieveExecutor = retrieveExecutor;
+        this.rerankService = rerankService;
     }
 
     public RetrievalContext retrieve(List<SubQuestionIntent> subIntents, int topK) {
@@ -61,6 +64,9 @@ public class RetrievalEngine {
 
             // ==== 去重 ====
             fused = deduplicate(fused);
+
+            // ==== Rerank 精排 ====
+            fused = rerankService.rerank(q, fused);
 
             if (CollUtil.isEmpty(fused)) {
                 log.info("子问题未检索到相关文档：{}", q);
