@@ -15,6 +15,15 @@ import java.util.concurrent.TimeUnit;
 public class ThreadPoolExecutorConfig {
 
     @Bean
+    public Executor retrieveExecutor() {
+        return new ThreadPoolExecutor(
+                2, 4, 60, TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(64),
+                new ThreadPoolExecutor.CallerRunsPolicy()
+        );
+    }
+
+    @Bean
     public Executor modelStreamExecutor() {
         return new ThreadPoolExecutor(
                 4,

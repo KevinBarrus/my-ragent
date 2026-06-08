@@ -6,22 +6,19 @@ import com.tkevinb.ragent.rag.core.intent.NodeScore;
 import com.tkevinb.ragent.rag.core.intent.NodeScoreFilters;
 import com.tkevinb.ragent.rag.dto.RetrievalContext;
 import com.tkevinb.ragent.rag.dto.SubQuestionIntent;
-import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
-import java.util.stream.Collectors;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
- * 多通道检索引擎
+ * 多通道检索引擎 — 通过 SearchChannel 接口解耦
  * <p>
- * 双通道并行检索 + RRF 融合 + 去重 + 证据预算：
- * 通道1：BGE 语义向量检索（PGVector）
- * 通道2：关键词匹配（二元组滑动窗口）
- * 后处理：RRF 排名融合 → 文本相似度去重 → 证据预算裁剪
+ * 并行调用所有通道 → RRF 融合 → 去重 → 证据预算
+ * <p>
+ * 新增通道只需实现 SearchChannel，无需改动本类。
  */
 @Slf4j
 @Service
@@ -29,34 +26,15 @@ public class RetrievalEngine {
 
     private static final int PER_QUESTION_BUDGET = 2200;
     private static final int TOTAL_BUDGET = 5200;
-    /** RRF 参数 k */
     private static final int RRF_K = 60;
 
-    private final VectorStoreService vectorStoreService;
-    private final KeywordSearchChannel keywordChannel;
-    private final JdbcTemplate vectorJdbc;
+    private final List<SearchChannel> channels;
+    private final Executor retrieveExecutor;
 
-    /** 文档缓存 — 关键词通道需要 */
-    private List<String> allDocuments = List.of();
-
-    public RetrievalEngine(VectorStoreService vectorStoreService,
-                           @Qualifier("vectorJdbcTemplate") JdbcTemplate vectorJdbc) {
-        this.vectorStoreService = vectorStoreService;
-        this.vectorJdbc = vectorJdbc;
-        this.keywordChannel = new KeywordSearchChannel();
-    }
-
-    @PostConstruct
-    public void loadDocs() {
-        try {
-            allDocuments = vectorJdbc.queryForList(
-                    "SELECT content FROM t_knowledge_chunk_vector WHERE enabled = 1 AND deleted = 0",
-                    String.class);
-            log.info("多通道引擎: 已加载 {} 条文档用于关键词检索", allDocuments.size());
-        } catch (Exception e) {
-            log.warn("关键词通道加载文档失败: {}", e.getMessage());
-            allDocuments = List.of();
-        }
+    public RetrievalEngine(List<SearchChannel> channels,
+                           @org.springframework.beans.factory.annotation.Qualifier("retrieveExecutor") Executor retrieveExecutor) {
+        this.channels = channels;
+        this.retrieveExecutor = retrieveExecutor;
     }
 
     public RetrievalContext retrieve(List<SubQuestionIntent> subIntents, int topK) {
@@ -70,14 +48,18 @@ public class RetrievalEngine {
             String q = intent.subQuestion();
             List<NodeScore> kbIntents = NodeScoreFilters.kb(intent.nodeScores());
 
-            // ==== 双通道并行检索 ====
-            List<RetrievedChunk> vecChunks = vectorStoreService.search(q, k);
-            List<RetrievedChunk> kwChunks = keywordChannel.search(q, allDocuments, k);
+            // ==== 并行调用所有通道 ====
+            List<CompletableFuture<List<RetrievedChunk>>> futures = channels.stream()
+                    .map(ch -> CompletableFuture.supplyAsync(() -> ch.search(q, k), retrieveExecutor))
+                    .toList();
+            List<List<RetrievedChunk>> allResults = futures.stream()
+                    .map(CompletableFuture::join)
+                    .toList();
 
             // ==== RRF 融合 ====
-            List<RetrievedChunk> fused = rrfFusion(vecChunks, kwChunks);
+            List<RetrievedChunk> fused = rrfFusion(allResults);
 
-            // ==== 去重（相似文本合并）====
+            // ==== 去重 ====
             fused = deduplicate(fused);
 
             if (CollUtil.isEmpty(fused)) {
@@ -85,9 +67,9 @@ public class RetrievalEngine {
                 continue;
             }
 
-            // ==== 预算裁剪 ====
             fused = applyPerQuestionBudget(fused);
-            log.info("子问题检索到 {} 个文档片段（预算裁剪后）：{}", fused.size(), q);
+            log.info("子问题检索到 {} 个文档片段（{} 通道, 预算裁剪后）：{}",
+                    fused.size(), channels.size(), q);
 
             String key = CollUtil.isNotEmpty(kbIntents) ? kbIntents.get(0).getNode().getId() : "default";
             intentChunks.put(key, fused);
@@ -95,34 +77,29 @@ public class RetrievalEngine {
         }
 
         contexts = applyTotalBudget(contexts);
-        String kbContext = String.join("\n\n---\n\n", contexts);
-        return RetrievalContext.builder().kbContext(kbContext).intentChunks(intentChunks).build();
+        return RetrievalContext.builder()
+                .kbContext(String.join("\n\n---\n\n", contexts))
+                .intentChunks(intentChunks).build();
     }
 
-    // ==================== RRF 融合 ====================
+    // ==================== RRF ====================
 
-    private List<RetrievedChunk> rrfFusion(List<RetrievedChunk> vec, List<RetrievedChunk> kw) {
-        // 为每个 chunk 分配唯一 ID（用文本 hash）
-        Map<String, RetrievedChunk> dedup = new LinkedHashMap<>();
-
-        for (int i = 0; i < vec.size(); i++) {
-            String key = textKey(vec.get(i).getText());
-            double score = 1.0 / (RRF_K + i + 1);
-            vec.get(i).setScore((float) score);
-            dedup.put(key, vec.get(i));
-        }
-        for (int i = 0; i < kw.size(); i++) {
-            String key = textKey(kw.get(i).getText());
-            double score = 1.0 / (RRF_K + i + 1);
-            if (dedup.containsKey(key)) {
-                dedup.get(key).setScore(dedup.get(key).getScore() + (float) score);
-            } else {
-                kw.get(i).setScore((float) score);
-                dedup.put(key, kw.get(i));
+    private List<RetrievedChunk> rrfFusion(List<List<RetrievedChunk>> allResults) {
+        Map<String, RetrievedChunk> merged = new LinkedHashMap<>();
+        for (List<RetrievedChunk> results : allResults) {
+            for (int rank = 0; rank < results.size(); rank++) {
+                String key = textKey(results.get(rank).getText());
+                double score = 1.0 / (RRF_K + rank + 1);
+                if (merged.containsKey(key)) {
+                    merged.get(key).setScore(merged.get(key).getScore() + (float) score);
+                } else {
+                    RetrievedChunk c = results.get(rank);
+                    c.setScore((float) score);
+                    merged.put(key, c);
+                }
             }
         }
-
-        List<RetrievedChunk> result = new ArrayList<>(dedup.values());
+        List<RetrievedChunk> result = new ArrayList<>(merged.values());
         result.sort((a, b) -> Float.compare(b.getScore(), a.getScore()));
         return result;
     }
@@ -134,13 +111,9 @@ public class RetrievalEngine {
         List<RetrievedChunk> result = new ArrayList<>();
         result.add(chunks.get(0));
         for (int i = 1; i < chunks.size(); i++) {
-            String text = chunks.get(i).getText();
             boolean dup = false;
             for (RetrievedChunk kept : result) {
-                if (textOverlap(text, kept.getText()) > 0.7) {
-                    dup = true;
-                    break;
-                }
+                if (textOverlap(chunks.get(i).getText(), kept.getText()) > 0.7) { dup = true; break; }
             }
             if (!dup) result.add(chunks.get(i));
         }
@@ -148,22 +121,18 @@ public class RetrievalEngine {
     }
 
     private double textOverlap(String a, String b) {
-        Set<String> ta = tokenize2gram(a), tb = tokenize2gram(b);
+        Set<String> ta = new HashSet<>(), tb = new HashSet<>();
+        for (int i = 0; i < a.length() - 1; i++) ta.add(a.substring(i, i + 2));
+        for (int i = 0; i < b.length() - 1; i++) tb.add(b.substring(i, i + 2));
         Set<String> isect = new HashSet<>(ta); isect.retainAll(tb);
         return (double) isect.size() / Math.min(ta.size(), tb.size());
-    }
-
-    private Set<String> tokenize2gram(String text) {
-        Set<String> s = new HashSet<>();
-        for (int i = 0; i < text.length() - 1; i++) s.add(text.substring(i, i+2));
-        return s;
     }
 
     private String textKey(String text) {
         return text != null && text.length() > 40 ? text.substring(0, 40) : text;
     }
 
-    // ==================== 预算控制（不变） ====================
+    // ==================== 预算 ====================
 
     private List<RetrievedChunk> applyPerQuestionBudget(List<RetrievedChunk> chunks) {
         int used = 0;

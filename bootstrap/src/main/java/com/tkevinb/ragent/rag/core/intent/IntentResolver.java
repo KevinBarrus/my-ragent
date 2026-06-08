@@ -24,12 +24,16 @@ import static com.tkevinb.ragent.rag.enums.IntentKind.SYSTEM;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class IntentResolver {
 
-    @Qualifier("defaultIntentClassifier")
     private final IntentClassifier intentClassifier;
     private final Executor intentClassifyExecutor;
+
+    public IntentResolver(@Qualifier("defaultIntentClassifier") IntentClassifier intentClassifier,
+                          @Qualifier("modelStreamExecutor") Executor intentClassifyExecutor) {
+        this.intentClassifier = intentClassifier;
+        this.intentClassifyExecutor = intentClassifyExecutor;
+    }
 
     @RagTraceNode(name = "intent-resolve", type = "INTENT")
     public List<SubQuestionIntent> resolve(RewriteResult rewriteResult) {

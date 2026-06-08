@@ -1,6 +1,11 @@
 package com.tkevinb.ragent.rag.core.retrieve;
 
 import com.tkevinb.ragent.framework.convention.RetrievedChunk;
+import jakarta.annotation.PostConstruct;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -9,17 +14,33 @@ import java.util.stream.Collectors;
  * 关键词检索通道
  * <p>
  * 用二元组滑动窗口做字面匹配，弥补向量检索对精确关键词的弱点。
- * 例如"OA系统"这种专有名词，BGE 可能不敏感，但关键词匹配能精准命中。
  */
-public class KeywordSearchChannel {
+@Slf4j
+@Component
+public class KeywordSearchChannel implements SearchChannel {
 
-    /**
-     * 从给定文档列表中按关键词匹配搜索
-     * @param query 用户问题
-     * @param documents 文档内容列表
-     * @param topK 返回数量
-     */
-    public List<RetrievedChunk> search(String query, List<String> documents, int topK) {
+    private final JdbcTemplate vectorJdbc;
+    private List<String> documents = List.of();
+
+    public KeywordSearchChannel(@Qualifier("vectorJdbcTemplate") JdbcTemplate vectorJdbc) {
+        this.vectorJdbc = vectorJdbc;
+    }
+
+    @PostConstruct
+    public void loadDocs() {
+        try {
+            documents = vectorJdbc.queryForList(
+                    "SELECT content FROM t_knowledge_chunk_vector WHERE enabled = 1 AND deleted = 0",
+                    String.class);
+            log.info("关键词通道: 已加载 {} 条文档", documents.size());
+        } catch (Exception e) {
+            log.warn("关键词通道加载文档失败: {}", e.getMessage());
+        }
+    }
+
+    @Override
+    public List<RetrievedChunk> search(String query, int topK) {
+        if (documents.isEmpty()) return List.of();
         Set<String> queryTokens = tokenize(query);
         List<ScoredDoc> scored = new ArrayList<>();
 
@@ -47,11 +68,9 @@ public class KeywordSearchChannel {
         for (String phrase : phrases) {
             phrase = phrase.trim();
             if (phrase.length() < 2) continue;
-            for (int i = 0; i < phrase.length(); i++) {
-                for (int j = i + 2; j <= Math.min(i + 4, phrase.length()); j++) {
+            for (int i = 0; i < phrase.length(); i++)
+                for (int j = i + 2; j <= Math.min(i + 4, phrase.length()); j++)
                     tokens.add(phrase.substring(i, j));
-                }
-            }
         }
         return tokens;
     }
