@@ -5,6 +5,7 @@ import com.tkevinb.ragent.framework.convention.ChatRequest;
 import com.tkevinb.ragent.infra.chat.LLMService;
 import com.tkevinb.ragent.infra.chat.StreamCancellationHandle;
 import com.tkevinb.ragent.rag.config.AblationProperties;
+import com.tkevinb.ragent.rag.core.guidance.IntentGuidanceService;
 import com.tkevinb.ragent.rag.core.intent.IntentResolver;
 import com.tkevinb.ragent.rag.core.memory.ConversationMemoryService;
 import com.tkevinb.ragent.rag.enums.IntentKind;
@@ -46,6 +47,7 @@ public class StreamChatPipeline {
     private final StreamTaskManager taskManager;
     private final PromptTemplateLoader templateLoader;
     private final AblationProperties ablation;
+    private final IntentGuidanceService guidanceService;
 
     /**
      * 执行流式对话管道
@@ -160,10 +162,16 @@ public class StreamChatPipeline {
         ctx.setIntentMs(System.currentTimeMillis() - t);
     }
 
-    //MVP阶段暂时跳过
+    //意图模糊时反问用户，不再硬往下走
     private boolean handleGuideAmbiguity(StreamChatContext ctx) {
-        log.info("处理歧义引导");
-        return false;
+        String prompt = guidanceService.check(ctx.getQuestion(), ctx.getSubIntents());
+        if (prompt == null) {
+            return false; // 意图明确，继续
+        }
+        log.info("意图模糊，反问用户: {}", prompt);
+        ctx.getCallback().onContent(prompt);
+        ctx.getCallback().onComplete();
+        return true; // 短路，不检索
     }
 
     //判断是否为纯系统问题（无需检索），直接 LLM 回答
