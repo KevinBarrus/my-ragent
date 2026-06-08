@@ -27,6 +27,11 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class RetrievalEngine {
 
+    /** 单子问题证据预算上限（字符数） */
+    private static final int PER_QUESTION_BUDGET = 2200;
+    /** 总证据预算上限（字符数） */
+    private static final int TOTAL_BUDGET = 5200;
+
     private final VectorStoreService vectorStoreService;
 
     /**
@@ -61,7 +66,9 @@ public class RetrievalEngine {
                 continue;
             }
 
-            log.info("子问题检索到 {} 个文档片段：{}", chunks.size(), intent.subQuestion());
+            // 证据预算：单子问题裁剪
+            chunks = applyPerQuestionBudget(chunks);
+            log.info("子问题检索到 {} 个文档片段（预算裁剪后）：{}", chunks.size(), intent.subQuestion());
 
             //把搜到的文档片段按意图节点 ID 分组
             //例如：
@@ -81,6 +88,9 @@ public class RetrievalEngine {
             allContexts.add(formatContext(intent.subQuestion(), chunks));
         }
 
+        // 总证据预算控制
+        allContexts = applyTotalBudget(allContexts);
+
         //多个子问题的上下文用分隔线拼接。比如：
         //【问题】请假需要什么材料？
         //[文档片段 1] (相关度: 0.92) 请假需提交...
@@ -98,6 +108,52 @@ public class RetrievalEngine {
         //kbContext：RAGPromptService 会读这个字段，把它们包在 <evidence> 标签里塞进 system prompt
         //mcpContext：留给 MCP 工具调用的结果，现在没有，字段先占位
         //intentChunks：按意图节点 ID 分组的数据，RAGPromptService 用这个判断"哪些意图有检索结果、哪些没有"，决定用哪个模板
+    }
+
+    /**
+     * 单子问题证据预算：按分数降序保留，超出 PER_QUESTION_BUDGET 的截断或丢弃
+     */
+    private List<RetrievedChunk> applyPerQuestionBudget(List<RetrievedChunk> chunks) {
+        int used = 0;
+        List<RetrievedChunk> kept = new ArrayList<>();
+        for (RetrievedChunk c : chunks) {
+            String text = c.getText();
+            if (text == null) continue;
+            int len = text.length();
+            if (used + len > PER_QUESTION_BUDGET) {
+                int remain = PER_QUESTION_BUDGET - used;
+                if (remain > 50) {
+                    // 截断最后一个 chunk
+                    c.setText(text.substring(0, remain) + "...");
+                    kept.add(c);
+                }
+                break;
+            }
+            used += len;
+            kept.add(c);
+        }
+        return kept;
+    }
+
+    /**
+     * 总证据预算：多个子问题的上下文拼接后，超出 TOTAL_BUDGET 的裁剪后面的子问题
+     */
+    private List<String> applyTotalBudget(List<String> contexts) {
+        int used = 0;
+        List<String> kept = new ArrayList<>();
+        for (String ctx : contexts) {
+            int len = ctx.length();
+            if (used + len > TOTAL_BUDGET) {
+                int remain = TOTAL_BUDGET - used;
+                if (remain > 100) {
+                    kept.add(ctx.substring(0, remain) + "\n...");
+                }
+                break;
+            }
+            used += len;
+            kept.add(ctx);
+        }
+        return kept;
     }
 
     /**
