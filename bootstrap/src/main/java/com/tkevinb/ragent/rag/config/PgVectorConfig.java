@@ -31,6 +31,7 @@ public class PgVectorConfig {
         ds.setUsername(username);
         ds.setPassword(password);
         ds.setMaximumPoolSize(3);
+        ds.setPoolName("HikariPool-PGVector");
         return ds;
     }
 

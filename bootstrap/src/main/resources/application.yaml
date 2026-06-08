@@ -40,7 +40,7 @@ rag:
     datasource:
       url: jdbc:postgresql://127.0.0.1:5432/ragent_vec
       username: postgres
-      password: ${PG_PASSWORD:}
+      password: ${PG_PASSWORD}
 
   default:
     sse-timeout-ms: 300000
