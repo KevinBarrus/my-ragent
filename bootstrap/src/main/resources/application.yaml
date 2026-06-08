@@ -45,6 +45,9 @@ rag:
   default:
     sse-timeout-ms: 300000
 
+  embedding:
+    api-key: ${SILICONFLOW_API_KEY}
+
   ablation:
     query-rewrite-enabled: true
     intent-enabled: true

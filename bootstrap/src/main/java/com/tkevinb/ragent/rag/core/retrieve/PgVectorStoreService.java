@@ -7,23 +7,24 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.*;
 
 /**
- * PGVector 向量检索引擎
+ * PGVector 向量检索引擎 — 支持 n-gram 和 BGE 两种 embedding
  */
 @Slf4j
 @Service
 public class PgVectorStoreService implements VectorStoreService {
 
-    private static final int DIM = 768;
+    private static final int DIM = 1024; // BGE-large-zh 输出维度
 
     private final JdbcTemplate vectorJdbc;
+    private final BgeEmbeddingService bgeService;
 
-    public PgVectorStoreService(@Qualifier("vectorJdbcTemplate") JdbcTemplate vectorJdbc) {
+    public PgVectorStoreService(@Qualifier("vectorJdbcTemplate") JdbcTemplate vectorJdbc,
+                                BgeEmbeddingService bgeService) {
         this.vectorJdbc = vectorJdbc;
+        this.bgeService = bgeService;
     }
 
     @PostConstruct
@@ -33,7 +34,7 @@ public class PgVectorStoreService implements VectorStoreService {
                     CREATE TABLE IF NOT EXISTS t_knowledge_chunk_vector (
                         id BIGSERIAL PRIMARY KEY, kb_id BIGINT, doc_id BIGINT,
                         chunk_index INT DEFAULT 0, content TEXT NOT NULL,
-                        embedding vector(768), enabled SMALLINT DEFAULT 1,
+                        embedding vector(1024), enabled SMALLINT DEFAULT 1,
                         created_by VARCHAR(64) DEFAULT 'admin',
                         create_time TIMESTAMP DEFAULT NOW(), deleted SMALLINT DEFAULT 0
                     )
@@ -47,19 +48,26 @@ public class PgVectorStoreService implements VectorStoreService {
             );
             if (unindexed.isEmpty()) return;
             for (Row row : unindexed) {
+                float[] vec = embed(row.content);
+                if (vec == null) continue;
                 vectorJdbc.update("UPDATE t_knowledge_chunk_vector SET embedding = ?::vector WHERE id = ?",
-                        arrayToPgVector(embed(row.content)), row.id);
+                        arrayToPgVector(vec), row.id);
             }
-            log.info("PGVector: 已为 {} 条文档生成 embedding", unindexed.size());
+            log.info("PGVector: BGE embedding 已为 {} 条文档生成", unindexed.size());
         } catch (Exception e) {
-            log.warn("PGVector: 初始化 embedding 失败。error={}", e.getMessage());
+            log.warn("PGVector: embedding 初始化失败。error={}", e.getMessage());
         }
     }
 
     @Override
     public List<RetrievedChunk> search(String query, int topK) {
         if (query == null || query.isBlank()) return List.of();
-        String vecStr = arrayToPgVector(embed(query));
+        float[] vec = embed(query);
+        if (vec == null) {
+            log.warn("PGVector: query embedding 生成失败, query='{}'", query);
+            return List.of();
+        }
+        String vecStr = arrayToPgVector(vec);
         try {
             List<Row> rows = vectorJdbc.query(
                     "SELECT content, 1 - (embedding <=> ?::vector) AS score FROM t_knowledge_chunk_vector " +
@@ -77,22 +85,9 @@ public class PgVectorStoreService implements VectorStoreService {
         }
     }
 
-    // ==================== Embedding ====================
-
     private float[] embed(String text) {
-        float[] vec = new float[DIM];
-        if (text == null || text.isBlank()) return vec;
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            for (int i = 0; i < text.length() - 1; i++) {
-                byte[] hash = md.digest(text.substring(i, i + 2).getBytes(StandardCharsets.UTF_8));
-                int slot = Math.abs(((hash[0] & 0xFF) << 24) | ((hash[1] & 0xFF) << 16) | ((hash[2] & 0xFF) << 8) | (hash[3] & 0xFF)) % DIM;
-                vec[slot] += 1.0f;
-            }
-            float norm = 0; for (float v : vec) norm += v * v;
-            if (norm > 0) { norm = (float) Math.sqrt(norm); for (int i = 0; i < DIM; i++) vec[i] /= norm; }
-        } catch (Exception ignored) {}
-        return vec;
+        // 先试 BGE（语义），失败则降级为 null（不兜底 n-gram，保证数据纯净）
+        return bgeService.embed(text);
     }
 
     private String arrayToPgVector(float[] vec) {
