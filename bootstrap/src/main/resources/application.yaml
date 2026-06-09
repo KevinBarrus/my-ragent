@@ -46,7 +46,7 @@ rag:
     sse-timeout-ms: 300000
 
   embedding:
-    api-key: ${SILICONFLOW_API_KEY}
+    api-key: ${SILICONFLOW_EMBEDDING_KEY}
 
   ablation:
     query-rewrite-enabled: true
@@ -61,12 +61,17 @@ rag:
     summary-enabled: false
     title-max-length: 30
 
-# AI 模型配置（使用 DeepSeek API）
+# AI 模型配置
 ai:
   providers:
     deepseek:
       url: https://api.deepseek.com
       apiKey: ${DEEPSEEK_API_KEY}
+      endpoints:
+        chat: /v1/chat/completions
+    siliconflow:
+      url: https://api.siliconflow.cn
+      apiKey: ${SILICONFLOW_CHAT_KEY}
       endpoints:
         chat: /v1/chat/completions
 
@@ -84,6 +89,11 @@ ai:
         provider: deepseek
         model: deepseek-chat
         priority: 1
+      # 备选模型 — 主模型故障时自动 fallback
+      - id: siliconflow-qwen
+        provider: siliconflow
+        model: Qwen/Qwen2.5-7B-Instruct
+        priority: 10
 
   embedding:
     default-model: emb-dummy
