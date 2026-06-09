@@ -70,15 +70,15 @@ public class PgVectorStoreService implements VectorStoreService {
         String vecStr = arrayToPgVector(vec);
         try {
             List<Row> rows = vectorJdbc.query(
-                    "SELECT content, 1 - (embedding <=> ?::vector) AS score FROM t_knowledge_chunk_vector " +
+                    "SELECT id, content, 1 - (embedding <=> ?::vector) AS score FROM t_knowledge_chunk_vector " +
                             "WHERE enabled = 1 AND deleted = 0 AND embedding IS NOT NULL " +
                             "ORDER BY embedding <=> ?::vector LIMIT ?",
                     ps -> { ps.setString(1, vecStr); ps.setString(2, vecStr); ps.setInt(3, topK); },
-                    (rs, rn) -> new Row(rs.getString("content"), rs.getDouble("score"), 0L)
+                    (rs, rn) -> new Row(rs.getLong("id"), rs.getString("content"), rs.getDouble("score"))
             );
             if (rows.isEmpty()) { log.info("PGVector: query='{}', 无结果", query); return List.of(); }
             log.info("PGVector: query='{}', 返回 {} 条, 最高分={}", query, rows.size(), String.format("%.2f", rows.get(0).score));
-            return rows.stream().map(r -> RetrievedChunk.builder().text(r.content).score((float) r.score).build()).toList();
+            return rows.stream().map(r -> RetrievedChunk.builder().id(String.valueOf(r.id)).text(r.content).score((float) r.score).build()).toList();
         } catch (Exception e) {
             log.error("PGVector: 检索失败 query='{}'", query, e);
             return List.of();
@@ -96,7 +96,7 @@ public class PgVectorStoreService implements VectorStoreService {
         sb.append("]"); return sb.toString();
     }
 
-    private record Row(String content, double score, long id) {
-        Row(long id, String content) { this(content, 0, id); }
+    private record Row(long id, String content, double score) {
+        Row(long id, String content) { this(id, content, 0); }
     }
 }

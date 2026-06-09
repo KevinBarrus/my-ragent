@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * 多通道检索引擎 — 通过 SearchChannel 接口解耦
@@ -31,13 +32,16 @@ public class RetrievalEngine {
     private final List<SearchChannel> channels;
     private final Executor retrieveExecutor;
     private final BgeRerankService rerankService;
+    private final JdbcTemplate vectorJdbc;
 
     public RetrievalEngine(List<SearchChannel> channels,
                            @org.springframework.beans.factory.annotation.Qualifier("retrieveExecutor") Executor retrieveExecutor,
-                           BgeRerankService rerankService) {
+                           BgeRerankService rerankService,
+                           @org.springframework.beans.factory.annotation.Qualifier("vectorJdbcTemplate") JdbcTemplate vectorJdbc) {
         this.channels = channels;
         this.retrieveExecutor = retrieveExecutor;
         this.rerankService = rerankService;
+        this.vectorJdbc = vectorJdbc;
     }
 
     public RetrievalContext retrieve(List<SubQuestionIntent> subIntents, int topK) {
@@ -68,6 +72,9 @@ public class RetrievalEngine {
             // ==== Rerank 精排 ====
             fused = rerankService.rerank(q, fused);
 
+            // ==== Parent-Child 块聚合 ====
+            fused = enrichWithParent(fused);
+
             if (CollUtil.isEmpty(fused)) {
                 log.info("子问题未检索到相关文档：{}", q);
                 continue;
@@ -86,6 +93,26 @@ public class RetrievalEngine {
         return RetrievalContext.builder()
                 .kbContext(String.join("\n\n---\n\n", contexts))
                 .intentChunks(intentChunks).build();
+    }
+
+    // ==================== Parent-Child ====================
+
+    private List<RetrievedChunk> enrichWithParent(List<RetrievedChunk> chunks) {
+        return chunks.stream().map(chunk -> {
+            try {
+                Long parentId = vectorJdbc.queryForObject(
+                        "SELECT parent_id FROM t_knowledge_chunk_vector WHERE id = ?::bigint",
+                        Long.class, chunk.getId());
+                if (parentId == null || parentId == Long.parseLong(chunk.getId())) return chunk;
+
+                String parentText = vectorJdbc.queryForObject(
+                        "SELECT content FROM t_knowledge_chunk_vector WHERE id = ?", String.class, parentId);
+                if (parentText != null && parentText.length() > chunk.getText().length() + 50) {
+                    chunk.setText(parentText); // 用 Parent 完整上下文替换
+                }
+            } catch (Exception ignored) {}
+            return chunk;
+        }).toList();
     }
 
     // ==================== RRF ====================
