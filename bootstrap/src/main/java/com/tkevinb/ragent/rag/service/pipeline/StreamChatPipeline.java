@@ -111,6 +111,7 @@ public class StreamChatPipeline {
     }
 
     private void logTiming(StreamChatContext ctx, StopWatch sw) {
+
         log.info("[Ablation] Pipeline 完成 - {} | totalMs={} | {}",
                 ctx.getAblationTags(), ctx.getTotalMs(), sw.prettyPrint());
     }
