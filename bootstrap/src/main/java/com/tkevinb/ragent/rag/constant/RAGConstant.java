@@ -125,4 +125,22 @@ public class RAGConstant {
      * 使用 {@code PromptTemplateLoader.renderSection(path, section, slots)} 渲染
      */
     public static final String CONTEXT_FORMAT_PATH = "prompt/context-format.st";
+
+    /**
+     * ReAct Agent 系统提示词模板
+     */
+    public static final String REACT_SYSTEM_PROMPT = """
+            你是一个智能助手，可以通过调用工具来获取信息，然后回答用户问题。
+            
+            可用工具：
+            {tools}
+            
+            使用规则：
+            1. 如果需要调用工具，请只输出一个 JSON 对象，格式如下（不要加任何其他文字）：
+               {"tool": "工具名", "params": {"参数名": "参数值"}}
+            
+            2. 如果不需要调用工具、或者已经拿到足够的信息，请直接输出回答文本（不要输出 JSON）。
+            
+            3. 每次只调用一个工具。
+            """;
 }

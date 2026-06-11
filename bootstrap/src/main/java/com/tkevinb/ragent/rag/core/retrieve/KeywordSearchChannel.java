@@ -11,16 +11,19 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * 关键词检索通道
+ * 关键词检索通道 — 倒排索引版
  * <p>
- * 用二元组滑动窗口做字面匹配，弥补向量检索对精确关键词的弱点。
+ * 启动时构建 {词 → [文档ID]} 倒排索引，检索时 O(1) 定位文档。
  */
 @Slf4j
 @Component
 public class KeywordSearchChannel implements SearchChannel {
 
     private final JdbcTemplate vectorJdbc;
-    private List<String> documents = List.of();
+    /** 文档内容缓存，id → content */
+    private final List<String> documents = new ArrayList<>();
+    /** 倒排索引：词 → 文档ID Set */
+    private final Map<String, Set<Integer>> invertedIndex = new HashMap<>();
 
     public KeywordSearchChannel(@Qualifier("vectorJdbcTemplate") JdbcTemplate vectorJdbc) {
         this.vectorJdbc = vectorJdbc;
@@ -29,12 +32,20 @@ public class KeywordSearchChannel implements SearchChannel {
     @PostConstruct
     public void loadDocs() {
         try {
-            documents = vectorJdbc.queryForList(
+            List<String> contents = vectorJdbc.queryForList(
                     "SELECT content FROM t_knowledge_chunk_vector WHERE enabled = 1 AND deleted = 0",
                     String.class);
-            log.info("关键词通道: 已加载 {} 条文档", documents.size());
+            documents.addAll(contents);
+            // 构建倒排索引
+            for (int i = 0; i < contents.size(); i++) {
+                Set<String> tokens = tokenize(contents.get(i));
+                for (String token : tokens) {
+                    invertedIndex.computeIfAbsent(token, k -> new HashSet<>()).add(i);
+                }
+            }
+            log.info("关键词通道(倒排): 已加载 {} 条文档, {} 个索引项", documents.size(), invertedIndex.size());
         } catch (Exception e) {
-            log.warn("关键词通道加载文档失败: {}", e.getMessage());
+            log.warn("关键词通道加载失败: {}", e.getMessage());
         }
     }
 
@@ -42,22 +53,32 @@ public class KeywordSearchChannel implements SearchChannel {
     public List<RetrievedChunk> search(String query, int topK) {
         if (documents.isEmpty()) return List.of();
         Set<String> queryTokens = tokenize(query);
-        List<ScoredDoc> scored = new ArrayList<>();
+        if (queryTokens.isEmpty()) return List.of();
 
-        for (String doc : documents) {
-            Set<String> docTokens = tokenize(doc);
-            Set<String> intersection = new HashSet<>(queryTokens);
-            intersection.retainAll(docTokens);
-            if (intersection.isEmpty()) continue;
-            double score = Math.min(1.0,
-                    (double) intersection.size() / Math.max(queryTokens.size(), 1)
-                            + intersection.size() * 0.05);
-            scored.add(new ScoredDoc(doc, score));
+        // 倒排检索：找到至少命中一个 token 的文档
+        Map<Integer, Integer> hitCount = new HashMap<>();
+        for (String token : queryTokens) {
+            Set<Integer> docIds = invertedIndex.get(token);
+            if (docIds != null) {
+                for (int id : docIds) {
+                    hitCount.merge(id, 1, Integer::sum);
+                }
+            }
         }
 
-        scored.sort((a, b) -> Double.compare(b.score, a.score));
-        return scored.subList(0, Math.min(topK, scored.size())).stream()
-                .map(s -> RetrievedChunk.builder().text(s.doc).score((float) s.score).build())
+        // 按命中数排序
+        return hitCount.entrySet().stream()
+                .sorted(Map.Entry.<Integer, Integer>comparingByValue().reversed())
+                .limit(topK)
+                .map(e -> {
+                    int id = e.getKey();
+                    int hits = e.getValue();
+                    double score = Math.min(1.0, (double) hits / queryTokens.size() + hits * 0.05);
+                    return RetrievedChunk.builder()
+                            .text(documents.get(id))
+                            .score((float) score)
+                            .build();
+                })
                 .collect(Collectors.toList());
     }
 
@@ -74,6 +95,4 @@ public class KeywordSearchChannel implements SearchChannel {
         }
         return tokens;
     }
-
-    private record ScoredDoc(String doc, double score) {}
 }

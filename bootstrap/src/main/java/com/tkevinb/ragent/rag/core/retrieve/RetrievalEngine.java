@@ -9,9 +9,14 @@ import com.tkevinb.ragent.rag.dto.SubQuestionIntent;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import cn.hutool.core.util.StrUtil;
+import com.tkevinb.ragent.rag.core.tool.McpParameterExtractor;
+import com.tkevinb.ragent.rag.core.tool.Tool;
+import com.tkevinb.ragent.rag.core.tool.ToolRegistry;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
@@ -33,15 +38,21 @@ public class RetrievalEngine {
     private final Executor retrieveExecutor;
     private final BgeRerankService rerankService;
     private final JdbcTemplate vectorJdbc;
+    private final ToolRegistry toolRegistry;
+    private final McpParameterExtractor mcpExtractor;
 
     public RetrievalEngine(List<SearchChannel> channels,
                            @org.springframework.beans.factory.annotation.Qualifier("retrieveExecutor") Executor retrieveExecutor,
                            BgeRerankService rerankService,
-                           @org.springframework.beans.factory.annotation.Qualifier("vectorJdbcTemplate") JdbcTemplate vectorJdbc) {
+                           @org.springframework.beans.factory.annotation.Qualifier("vectorJdbcTemplate") JdbcTemplate vectorJdbc,
+                           ToolRegistry toolRegistry,
+                           McpParameterExtractor mcpExtractor) {
         this.channels = channels;
         this.retrieveExecutor = retrieveExecutor;
         this.rerankService = rerankService;
         this.vectorJdbc = vectorJdbc;
+        this.toolRegistry = toolRegistry;
+        this.mcpExtractor = mcpExtractor;
     }
 
     public RetrievalContext retrieve(List<SubQuestionIntent> subIntents, int topK) {
@@ -50,12 +61,25 @@ public class RetrievalEngine {
 
         Map<String, List<RetrievedChunk>> intentChunks = new HashMap<>();
         List<String> contexts = new ArrayList<>();
+        List<String> mcpResults = new ArrayList<>();
 
         for (SubQuestionIntent intent : subIntents) {
             String q = intent.subQuestion();
             List<NodeScore> kbIntents = NodeScoreFilters.kb(intent.nodeScores());
+            List<NodeScore> mcpIntents = NodeScoreFilters.mcp(intent.nodeScores());
 
-            // ==== 并行调用所有通道 ====
+            // ==== MCP 工具调用 ====
+            for (NodeScore ns : mcpIntents) {
+                String toolId = ns.getNode().getMcpToolId();
+                Tool tool = toolRegistry.get(toolId);
+                if (tool == null) { log.warn("MCP 工具不存在: {}", toolId); continue; }
+                Map<String, Object> params = mcpExtractor.extract(q, tool);
+                String result = tool.execute(params);
+                mcpResults.add(result);
+                log.info("MCP 工具调用: {} → {}", toolId, StrUtil.maxLength(result, 200));
+            }
+
+            // ==== 并行调用所有检索通道 ====
             List<CompletableFuture<List<RetrievedChunk>>> futures = channels.stream()
                     .map(ch -> CompletableFuture.supplyAsync(() -> ch.search(q, k), retrieveExecutor))
                     .toList();
@@ -92,6 +116,7 @@ public class RetrievalEngine {
         contexts = applyTotalBudget(contexts);
         return RetrievalContext.builder()
                 .kbContext(String.join("\n\n---\n\n", contexts))
+                .mcpContext(String.join("\n", mcpResults))
                 .intentChunks(intentChunks).build();
     }
 

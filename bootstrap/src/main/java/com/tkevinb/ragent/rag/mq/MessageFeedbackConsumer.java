@@ -15,7 +15,7 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-// TODO 下午接入 RocketMQ 后取消注释
+// RocketMQ 本地不启动，用 NoopMessageQueueProducer 代替
 //@RocketMQMessageListener(
 //        topic = "message-feedback_topic${unique-name:}",
 //        consumerGroup = "message-feedback_cg${unique-name:}"
