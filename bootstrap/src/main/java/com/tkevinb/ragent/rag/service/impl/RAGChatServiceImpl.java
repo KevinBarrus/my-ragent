@@ -11,8 +11,12 @@ import com.tkevinb.ragent.rag.service.pipeline.StreamChatContext;
 import com.tkevinb.ragent.rag.service.pipeline.StreamChatPipeline;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import java.util.concurrent.TimeUnit;
 
 /**
  * RAG 对话服务默认实现
@@ -25,6 +29,7 @@ public class RAGChatServiceImpl implements RAGChatService {
     private final StreamChatPipeline chatPipeline;
     private final StreamCallbackFactory callbackFactory;
     private final StreamTaskManager taskManager;
+    private final RedissonClient redisson;
 
     @Override
     public void streamChat(String question, String conversationId, Boolean deepThinking, SseEmitter emitter) {
@@ -52,11 +57,23 @@ public class RAGChatServiceImpl implements RAGChatService {
                 .callback(callback)
                 .build();
 
+        RLock lock = redisson.getLock("ragent:lock:" + actualConversationId);
+        boolean locked = false;
         try {
+            locked = lock.tryLock(0, 5, TimeUnit.MINUTES);
+            if (!locked) {
+                callback.onContent("该对话正在处理中，请稍后再试");
+                callback.onComplete();
+                return;
+            }
             chatPipeline.execute(ctx);
         } catch (Exception e) {
             log.error("流式对话处理异常，会话ID：{}，任务ID：{}", actualConversationId, taskId, e);
             callback.onError(e);
+        } finally {
+            if (locked && lock.isHeldByCurrentThread()) {
+                try { lock.unlock(); } catch (Exception ignored) {}
+            }
         }
     }
 
