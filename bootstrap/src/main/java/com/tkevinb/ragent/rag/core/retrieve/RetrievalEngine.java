@@ -69,7 +69,9 @@ public class RetrievalEngine {
             List<NodeScore> mcpIntents = NodeScoreFilters.mcp(intent.nodeScores());
 
             // ==== MCP 工具调用 ====
+            boolean hasMcp = false;
             for (NodeScore ns : mcpIntents) {
+                hasMcp = true;
                 String toolId = ns.getNode().getMcpToolId();
                 Tool tool = toolRegistry.get(toolId);
                 if (tool == null) { log.warn("MCP 工具不存在: {}", toolId); continue; }
@@ -77,6 +79,11 @@ public class RetrievalEngine {
                 String result = tool.execute(params);
                 mcpResults.add(result);
                 log.info("MCP 工具调用: {} → {}", toolId, StrUtil.maxLength(result, 200));
+            }
+
+            // 只有 MCP 意图，没有 KB 意图 → 跳过检索
+            if (hasMcp && kbIntents.isEmpty()) {
+                continue;
             }
 
             // ==== 并行调用所有检索通道 ====

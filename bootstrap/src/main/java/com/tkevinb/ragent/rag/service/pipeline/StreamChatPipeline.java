@@ -177,19 +177,18 @@ public class StreamChatPipeline {
 
     //判断是否为纯系统问题（无需检索），直接 LLM 回答
     private boolean handleSystemOnlyQuestion(StreamChatContext ctx) {
-        // subIntents 为空（无 KB 意图匹配）或全都是 SYSTEM 类型时直接 LLM 回答
         List<SubQuestionIntent> subIntents = ctx.getSubIntents();
         if (subIntents != null && !subIntents.isEmpty()) {
-            // 检查是否有 KB 类型的意图
-            boolean hasKbIntent = subIntents.stream()
+            boolean hasKbOrMcp = subIntents.stream()
                     .flatMap(si -> si.nodeScores().stream())
-                    .anyMatch(ns -> ns.getNode() != null && ns.getNode().getKind() == IntentKind.KB);
-            if (hasKbIntent) {
-                return false; // 有 KB 意图，走检索
+                    .anyMatch(ns -> ns.getNode() != null &&
+                            (ns.getNode().getKind() == IntentKind.KB ||
+                             ns.getNode().getKind() == IntentKind.MCP));
+            if (hasKbOrMcp) {
+                return false; // 有 KB 或 MCP 意图，走检索/工具调用
             }
         }
-        // 无 KB 意图 → 直接 LLM 回答
-        log.info("无 KB 意图匹配，走纯 LLM 回答");
+        log.info("无 KB/MCP 意图匹配，走纯 LLM 回答");
         RagResponse(ctx, RetrievalContext.empty());
         return true;
     }
