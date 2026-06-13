@@ -28,8 +28,7 @@ public class DocumentParser {
      * @param fileName 文件名（用于 Tika 识别类型）
      * @return 解析后的纯文本
      */
-    public String parse(byte[] bytes, String fileName) throws IOException {
-        try (InputStream is = new ByteArrayInputStream(bytes)) {
+    public String parse(byte[] bytes, String fileName) throws IOException {try (InputStream is = new ByteArrayInputStream(bytes)) {
             Metadata metadata = new Metadata();
             metadata.set("resourceName", fileName);
             ToTextContentHandler handler = new ToTextContentHandler();

@@ -21,15 +21,14 @@ public class IngestionController {
 
     @PostMapping("/upload")
     public Result<String> upload(@RequestParam("file") MultipartFile file,
-                                  @RequestParam(defaultValue = "1") long kbId,
-                                  @RequestParam(defaultValue = "1") long docId) throws IOException {
+                                  @RequestParam(defaultValue = "1") long kbId) throws IOException {
         if (file.isEmpty()) {
             Result<String> r = new Result<>();
             r.setCode("400");
             r.setMessage("文件为空");
             return r;
         }
-        ingestionService.ingest(file.getBytes(), file.getOriginalFilename(), kbId, docId);
+        ingestionService.ingest(file.getBytes(), file.getOriginalFilename(), kbId);
         return Results.success("入库成功，文件名: " + file.getOriginalFilename());
     }
 }

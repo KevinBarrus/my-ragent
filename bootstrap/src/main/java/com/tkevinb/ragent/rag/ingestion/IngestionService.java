@@ -22,8 +22,9 @@ public class IngestionService {
     private final BgeEmbeddingService embeddingService;
     private final @Qualifier("vectorJdbcTemplate") JdbcTemplate vectorJdbc;
 
-    public void ingest(byte[] bytes, String fileName, long kbId, long docId) {
-        log.info("Ingestion 开始: fileName={}, size={}", fileName, bytes.length);
+    public void ingest(byte[] bytes, String fileName, long kbId) {
+        long docId = System.currentTimeMillis();
+        log.info("Ingestion 开始: fileName={}, docId={}, size={}", fileName, docId, bytes.length);
 
         String text;
         try { text = parser.parse(bytes, fileName); }
