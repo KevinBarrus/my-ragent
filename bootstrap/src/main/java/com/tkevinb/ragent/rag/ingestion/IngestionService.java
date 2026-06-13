@@ -21,10 +21,19 @@ public class IngestionService {
     private final ChunkStrategy chunker;
     private final BgeEmbeddingService embeddingService;
     private final @Qualifier("vectorJdbcTemplate") JdbcTemplate vectorJdbc;
+    private final JdbcTemplate defaultJdbc;
 
     public void ingest(byte[] bytes, String fileName, long kbId) {
         long docId = System.currentTimeMillis();
         log.info("Ingestion 开始: fileName={}, docId={}, size={}", fileName, docId, bytes.length);
+
+        // 1. 写入 MySQL t_knowledge_document
+        try {
+            defaultJdbc.update("INSERT INTO t_knowledge_document (kb_id, doc_name, file_url, file_type, status, created_by, create_time, deleted) VALUES (?, ?, ?, ?, 'completed', 'admin', NOW(), 0)",
+                    kbId, fileName, "/docs/" + fileName, fileName.endsWith(".md") ? "md" : "file");
+        } catch (Exception e) {
+            log.warn("写入 t_knowledge_document 失败: {}", e.getMessage());
+        }
 
         String text;
         try { text = parser.parse(bytes, fileName); }
