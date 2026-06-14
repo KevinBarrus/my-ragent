@@ -62,7 +62,10 @@ public class AgentCore {
 
             Action action = parse(decision);
             if (action == null) {
-                callback.onContent(decision);
+                // LLM 未输出合法 JSON → 清理非法字符后输出
+                String cleaned = decision.replaceAll("[{}]", "").replaceAll("\"[^\"]*\"", "").trim();
+                if (cleaned.length() < 5) cleaned = "抱歉，我暂时无法回答这个问题。";
+                callback.onContent(cleaned);
                 callback.onComplete();
                 return;
             }
@@ -107,6 +110,7 @@ public class AgentCore {
                 优先级规则：
                 - 工具返回的实时数据优先于知识库内容
                 - 知识库内容与工具返回矛盾时，以工具返回为准
+                - 如果工具参数不足（如需要员工工号但用户没提供），直接反问用户补充，不要反复调工具
                 
                 格式要求（每次只输出一个JSON，不要有其他文字）：
                 {"tool": "search_kb", "query": "搜索关键词"}
