@@ -9,7 +9,6 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Semaphore;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
@@ -21,9 +20,6 @@ import java.util.function.Function;
 @Slf4j
 @Component
 public class ModelRoutingExecutor {
-
-    private static final int MAX_CONCURRENT = 8;
-    private final Semaphore llmSemaphore = new Semaphore(MAX_CONCURRENT, true);
 
     private final AIModelProperties modelProperties;
     private final Map<String, ChatClient> clientsByProvider;
@@ -55,9 +51,7 @@ public class ModelRoutingExecutor {
     public <R> R executeWithFallback(
             List<ModelTarget> targets,
             BiFunction<ChatClient, ModelTarget, R> call) {
-        llmSemaphore.acquireUninterruptibly();
         Exception lastError = null;
-        try {
         for (ModelTarget target : targets) {
             if (!healthStore.allowCall(target.id())) continue;
             ChatClient client = clientsByProvider.get(target.candidate().getProvider());
@@ -74,9 +68,6 @@ public class ModelRoutingExecutor {
         }
         throw new IllegalStateException("所有模型调用失败" +
                 (lastError != null ? ": " + lastError.getMessage() : ""));
-        } finally {
-            llmSemaphore.release();
-        }
     }
 
     /**
