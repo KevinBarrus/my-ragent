@@ -48,6 +48,7 @@ public class StreamChatPipeline {
     private final PromptTemplateLoader templateLoader;
     private final AblationProperties ablation;
     private final IntentGuidanceService guidanceService;
+    private final AgentCore agentCore;
 
     /**
      * 执行流式对话管道
@@ -91,19 +92,9 @@ public class StreamChatPipeline {
             return;
         }
 
-        //6.检索
-        sw.start("retrieve");
-        RetrievalContext retrievalCtx = retrieve(ctx);
-        sw.stop();
-        if(handleEmptySearchResult(ctx, retrievalCtx)) {
-            ctx.setTotalMs(System.currentTimeMillis() - start);
-            logTiming(ctx, sw);
-            return;
-        }
-
-        //7.LLM 流式回答
-        sw.start("ragResponse");
-        RagResponse(ctx, retrievalCtx);
+        //6-7. Agent 循环（替代固定 retrieve + response）
+        sw.start("agent");
+        agentCore.execute(ctx, ctx.getSubIntents(), ctx.getCallback());
         sw.stop();
 
         ctx.setTotalMs(System.currentTimeMillis() - start);
